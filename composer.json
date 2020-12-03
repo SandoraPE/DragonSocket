@@ -1,0 +1,16 @@
+{
+  "name": "larrythecoder/phpsecuresocket",
+  "description": "A PHP Secure Socket for PocketMine",
+  "minimum-stability": "beta",
+  "license": "AGPL-3.0-only",
+  "authors": [
+    {
+      "name": "larryTheCoder",
+      "email": "larryPeter132@gmail.com"
+    }
+  ],
+  "require": {
+    "react/socket": "^1.5",
+    "ext-pthreads": "*"
+  }
+}

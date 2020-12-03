@@ -1,0 +1,5 @@
+name: SecureSocket
+main: larryTheCoder\SecureSocket
+version: "3.21.2"
+api: 3.11.2+ALPHA9
+author: larryTheCoder

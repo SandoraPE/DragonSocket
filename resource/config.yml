@@ -1,0 +1,12 @@
+# PHPSecure layer socket transfer configuration.
+# This config can only have 1 connection instances
+authentication:
+  # Passwordless authentication, this authentication doesn't
+  # require password passphrase but instead it will use the public key
+  # specified on the plugin path.
+  passwordless: true
+  # This method will be used if the passwordless options is set to true
+  # otherwise, look at the password key.
+  public-key: key.rsa
+  # Here is your password for the socket authentication.
+  password: 1234IsNotAGoodPassword
