@@ -57,6 +57,8 @@ use const pocketmine\DATA;
  */
 class NetworkContainer {
 
+	public const MAX_FRAME_LENGTH = 0x7FFF;
+
 	/** @var StreamSelectLoop */
 	private $streamLoop;
 	/** @var NetworkThread */
@@ -123,17 +125,7 @@ class NetworkContainer {
 					$this->thread->handleServerPacket($this->recvQueue, $sendQueue);
 
 					$this->waitingQueue = array_merge($sendQueue, $this->sendQueue, $this->waitingQueue);
-					foreach($this->waitingQueue as $packetId => $packet){
-						// Always redirect login packet to be written into our socket.
-						// Otherwise redirect all packets to the waiting queue.
-						if(Binary::readInt($packet) === DragonNetProtocol::LOGIN_PROTOCOL && $this->thread->connected){
-							($this->socketWrite)($packet);
-
-							unset($this->waitingQueue[$packetId]);
-						}else{
-							$this->sendQueue = [];
-						}
-					}
+					$this->sendQueue = [];
 				}
 			}
 		});
@@ -163,21 +155,25 @@ class NetworkContainer {
 		$connection = new Connector($this->streamLoop, [
 			'tls' => [
 				'peer_name'         => 'server1.potatohome.xyz',
-				'cafile'            => $this->thread->getSourcePath() . '/resource/certificate.crt',
+				'cafile'            => $this->thread->getSourcePath() . '/resources/certificate.crt',
 				'allow_self_signed' => true,
 				'crypto_method'     => STREAM_CRYPTO_METHOD_ANY_CLIENT,
 			],
 		]);
 
-		$connection->connect("tls://127.0.0.1:8080")->then(function(ConnectionInterface $connection): void{
-			$this->socketWrite = $this->getWriteClosure($connection);
+		// Needless to say, connection to the server always have their SSL certificates turned on.
+		$connection->connect("tls://" . $this->settings['server-socket'] . ":" . $this->settings['server-port'])->then(function(ConnectionInterface $connection): void{
+			$this->socketWrite = $this->getWriteClosure();
 
 			$connection->on('data', $this->getReadClosure());
 			$connection->on('close', $this->getCloseClosure());
+			$connection->on('end', $this->getSocketDrained());
 
-			$this->writeTimer = $this->streamLoop->addPeriodicTimer(0.01, function(){
-				foreach($this->sendQueue as $packet){
+			$this->writeTimer = $this->streamLoop->addPeriodicTimer(0.01, function() use ($connection): void{
+				foreach(array_merge($this->sendQueue, $this->waitingQueue) as $packet){
 					if(Binary::readInt($packet) === DragonNetProtocol::KEEP_ALIVE_PACKET && !$this->thread->connected){
+						continue;
+					}elseif(Binary::readInt($packet) !== DragonNetProtocol::LOGIN_PROTOCOL && !$this->thread->isAuthenticated){
 						continue;
 					}
 
@@ -185,9 +181,20 @@ class NetworkContainer {
 				}
 
 				$this->sendQueue = [];
+				$this->waitingQueue = [];
 
 				$this->thread->connected = true;
 				$this->thread->reconnecting = false;
+
+				if(!empty($this->frames)){
+					var_dump("Socket is ready " . count($this->frames));
+
+					foreach($this->frames as $id => $frame){
+						$connection->write($frame);
+
+						unset($this->frames[$id]);
+					}
+				}
 			});
 
 			$this->connection = $connection;
@@ -257,6 +264,7 @@ class NetworkContainer {
 
 			$this->thread->connected = false;
 			$this->thread->isAuthenticated = false;
+			$this->thread->loginSent = false;
 		};
 	}
 
@@ -308,12 +316,36 @@ class NetworkContainer {
 		};
 	}
 
-	private function getWriteClosure(ConnectionInterface $interface): Closure{
-		return static function(string $data) use ($interface): void{
-			$interface->write(Binary::writeInt(strlen($data)) . $data);
+	/** @var bool */
+	private $isReady = true;
+	/** @var string[] */
+	private $frames = [];
+
+	private function getSocketDrained(): Closure{
+		$isReady = &$this->isReady;
+
+		return static function() use (&$isReady): void{
+			var_dump("Socket is drained");
+
+			$isReady = true;
 		};
 	}
 
+	private function getWriteClosure(): Closure{
+		$frames = &$this->frames;
+
+		return static function(string $data) use (&$frames): void{
+			$data = Binary::writeInt(strlen($data)) . $data;
+
+			while(strlen($data) > self::MAX_FRAME_LENGTH){
+				$frames[] = substr($data, 0, self::MAX_FRAME_LENGTH);
+
+				$data = substr($data, self::MAX_FRAME_LENGTH, strlen($data));
+			}
+
+			$frames[] = $data;
+		};
+	}
 	//////////////////////////////////////// MEMORY-SAFE TASKS AND CLOSURES ////////////////////////////////////////
 
 }

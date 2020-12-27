@@ -26,6 +26,7 @@ use Phar;
 use pocketmine\snooze\SleeperNotifier;
 use pocketmine\Thread;
 use pocketmine\utils\MainLogger;
+use pocketmine\utils\TextFormat;
 use pocketmine\utils\Utils;
 use Threaded;
 use ThreadedLogger;
@@ -53,6 +54,8 @@ class NetworkThread extends Thread {
 	public $dumpMemory = false;
 	/** @var bool */
 	public $isAuthenticated = false;
+	/** @var bool */
+	public $loginSent = false;
 
 	/** @var SleeperNotifier */
 	private $notifier;
@@ -111,6 +114,7 @@ class NetworkThread extends Thread {
 		$this->connected = false;
 		$this->reconnecting = false;
 		$this->isRunning = false;
+		$this->loginSent = false;
 	}
 
 	/**
@@ -151,8 +155,31 @@ class NetworkThread extends Thread {
 		}
 	}
 
+	public function setAuthenticated(bool $isAuthenticated): void{
+		$this->isAuthenticated = $isAuthenticated;
+	}
+
+	public function sync(): void{
+		$maxTries = 0;
+		while(!$this->connected){
+			$maxTries++;
+
+			if($maxTries >= 2000){
+				MainLogger::getLogger()->info("[DragonNet] " . TextFormat::RED . "Timed out while waiting for socket to connect to the server");
+
+				return;
+			}
+
+			usleep(1000);
+		}
+	}
+
 	public function notifyMainThread(): void{
 		$this->notifier->wakeupSleeper();
+	}
+
+	public function getNotifier(): SleeperNotifier{
+		return $this->notifier;
 	}
 
 	public function getThreadName(): string{

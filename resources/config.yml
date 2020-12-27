@@ -10,3 +10,7 @@ authentication:
   public-key: key.rsa
   # Here is your password for the socket authentication.
   password: 1234IsNotAGoodPassword
+
+# These are your socket configuration.
+server-socket: 127.0.0.1
+server-port: 8080

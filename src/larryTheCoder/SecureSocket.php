@@ -31,7 +31,13 @@ class SecureSocket extends PluginBase {
 	private $session;
 
 	public function onLoad(){
+		$this->saveResource("config.yml", false);
+
 		$this->session = new NetworkSession($this);
+	}
+
+	public function onDisable(){
+		$this->session->shutdown();
 	}
 
 	public function getNetworkSession(): NetworkSession{

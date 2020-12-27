@@ -22,8 +22,11 @@ declare(strict_types = 1);
 
 namespace larryTheCoder\socket;
 
+use InvalidArgumentException;
 use larryTheCoder\socket\packets\Packet;
 use pocketmine\utils\MainLogger;
+use pocketmine\utils\Utils;
+use Throwable;
 
 /**
  * A representation of {@see Packet} event handler. This class contains
@@ -53,6 +56,19 @@ class NetworkEvent {
 
 			MainLogger::getLogger()->debug("Still " . strlen($remains) . " bytes unread in " . $packet->getName() . ": 0x" . bin2hex($remains));
 		}
+
+		foreach($this->events as [$callable, $eventType, $packets]){
+			try{
+				if($eventType === self::SCOPE_BLACKLIST && !in_array($packet->pid(), $packets, true)){
+					$callable($packet);
+				}elseif($eventType === self::SCOPE_WHITELIST && in_array($packet->pid(), $packets, true)){
+					$callable($packet);
+				}
+			}catch(Throwable $error){
+				MainLogger::getLogger()->critical('Unhandled callable function of ' . Utils::getNiceClosureName($callable) . '.');
+				MainLogger::getLogger()->logException($error);
+			}
+		}
 	}
 
 	/**
@@ -60,10 +76,10 @@ class NetworkEvent {
 	 * packets that are not listed in the scope will be returned in the callable function.
 	 *
 	 * @param callable $onRetrieve
-	 * @param Packet ...$blacklistPacket
+	 * @param int ...$blacklistPacket
 	 * @return int
 	 */
-	public function listenToPacket(callable $onRetrieve, Packet ...$blacklistPacket): int{
+	public function listenToPacket(callable $onRetrieve, int ...$blacklistPacket): int{
 		$this->events[$callableId = $this->callableId++] = [$onRetrieve, self::SCOPE_BLACKLIST, $blacklistPacket];
 
 		return $callableId;
@@ -74,10 +90,14 @@ class NetworkEvent {
 	 * these packets will be returned in the callable function.
 	 *
 	 * @param callable $onRetrieve
-	 * @param Packet ...$whitelistPacket
+	 * @param int ...$whitelistPacket
 	 * @return int
 	 */
-	public function listenOnlyPackets(callable $onRetrieve, Packet ...$whitelistPacket): int{
+	public function listenOnlyPackets(callable $onRetrieve, int ...$whitelistPacket): int{
+		if(empty($whitelistPacket)){
+			throw new InvalidArgumentException("Whitelist packets must have at least 1 pid entry.");
+		}
+
 		$this->events[$callableId = $this->callableId++] = [$onRetrieve, self::SCOPE_WHITELIST, $whitelistPacket];
 
 		return $callableId;
