@@ -1,6 +1,6 @@
 <?php
 /*
- * PHP Secure Socket Transfer
+ * PHP Secure Socket Client
  *
  * Copyright (C) 2020 larryTheCoder
  *
@@ -24,8 +24,7 @@ namespace larryTheCoder\socket\packets\protocol;
 
 interface DragonNetProtocol {
 
-	public const LOGIN_PROTOCOL = 1;
-	public const DISCONNECT_PACKET = 2;
-	public const KEEP_ALIVE_PACKET = 3;
+	public const DISCONNECT_PACKET = 1;
+	public const KEEP_ALIVE_PACKET = 2;
 
 }

@@ -1,2 +1,4 @@
-# PHP Secure Socket
-A communication socket that are used to transfer data securely with SSL.
+# DragonSocket
+
+A passwordless client socket communication channel for [DoxyProtocol](https://github.com/larryTheCoder/DoxyProtocol).
+Configure the port in `config.yml` and copy your server certificates in DragonSocket's plugin data folder.

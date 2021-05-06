@@ -1,6 +1,6 @@
 <?php
 /*
- * PHP Secure Socket Transfer
+ * PHP Secure Socket Client
  *
  * Copyright (C) 2020 larryTheCoder
  *

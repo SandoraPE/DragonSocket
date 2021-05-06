@@ -1,6 +1,6 @@
 <?php
 /*
- * PHP Secure Socket Transfer
+ * PHP Secure Socket Client
  *
  * Copyright (C) 2020 larryTheCoder
  *
@@ -31,12 +31,12 @@ abstract class Packet extends NetworkBinaryStream {
 	public const NETWORK_ID = 0;
 
 	/** @var bool */
-	public $isEncoded = false;
+	public bool $isEncoded = false;
 
 	/**
 	 * @return int
 	 */
-	public function pid(){
+	public function pid(): int{
 		return $this::NETWORK_ID;
 	}
 

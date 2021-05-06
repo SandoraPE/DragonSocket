@@ -1,6 +1,6 @@
 <?php
 /**
- * PHP Secure Socket Transfer
+ * PHP Secure Socket Client
  *
  * Copyright (C) 2020 larryTheCoder
  *
@@ -22,37 +22,30 @@ namespace larryTheCoder\socket;
 
 use larryTheCoder\SecureSocket;
 use larryTheCoder\socket\network\NetworkThread;
-use larryTheCoder\socket\packets\impl\DisconnectPacket;
 use larryTheCoder\socket\packets\impl\KeepAlivePacket;
-use larryTheCoder\socket\packets\impl\LoginPacket;
 use larryTheCoder\socket\packets\Packet;
 use pocketmine\scheduler\ClosureTask;
 use pocketmine\Server;
 use pocketmine\snooze\SleeperHandler;
 use pocketmine\snooze\SleeperNotifier;
 use pocketmine\utils\MainLogger;
-use pocketmine\utils\TextFormat;
 
 class NetworkSession {
 
-	/** @var NetworkThread */
-	private static $networkThread;
+	/** @var NetworkThread|null */
+	private static ?NetworkThread $networkThread = null;
 
 	/** @var Packet[] */
-	private $sendQueue = [];
+	private array $sendQueue = [];
 	/** @var Packet[] */
-	private $recvQueue = [];
+	private array $recvQueue = [];
 	/** @var NetworkEvent */
-	private $networkEvent;
+	private NetworkEvent $networkEvent;
 
-	/** @var int */
-	private $assignedNode;
-	/** @var mixed[] */
-	private $config;
-	/** @var SecureSocket */
-	private $plugin;
+	/** @var array */
+	private array $config;
 	/*** @var SleeperHandler */
-	private $eventLoop;
+	private SleeperHandler $eventLoop;
 
 	public static function getNetworkThread(): NetworkThread{
 		return self::$networkThread;
@@ -61,35 +54,24 @@ class NetworkSession {
 	public function __construct(SecureSocket $plugin){
 		$this->eventLoop = Server::getInstance()->getTickSleeper();
 		$this->config = $plugin->getConfig()->getAll();
-		$this->plugin = $plugin;
+
+		$plugin->saveResource("certificate.crt");
 
 		if(self::$networkThread === null || !self::$networkThread->isRunning()){
-			$this->eventLoop->addNotifier($notifier = new SleeperNotifier(), function() use (&$loginSent): void{
+			$this->eventLoop->addNotifier($notifier = new SleeperNotifier(), function(): void{
 				$this->processPackets();
 			});
 
-			self::$networkThread = new NetworkThread(MainLogger::getLogger(), $notifier, $this->config);
+			self::$networkThread = new NetworkThread($plugin, MainLogger::getLogger(), $notifier, $this->config);
 			self::$networkThread->sync();
 		}
 
 		$this->networkEvent = new NetworkEvent();
-		$this->networkEvent->listenOnlyPackets(function(Packet $packet): void{
-			$thread = self::getNetworkThread();
-			if($packet instanceof LoginPacket){
-				$this->assignedNode = $packet->assignedNode;
-
-				$thread->isAuthenticated = true;
-
-				MainLogger::getLogger()->info("[DragonNet] " . TextFormat::GREEN . "Successfully authenticated to the DragonServer socket. (Node " . $this->assignedNode . ")");
-			}elseif($packet instanceof DisconnectPacket && !$thread->isAuthenticated){
-				MainLogger::getLogger()->info("[DragonNet] " . TextFormat::RED . "Unable to authenticate to the DragonServer socket. (Error code {$packet->errorCode}))");
-			}
-		}, LoginPacket::NETWORK_ID, DisconnectPacket::NETWORK_ID);
 
 		$plugin->getScheduler()->scheduleRepeatingTask(new ClosureTask(function(int $currentTick): void{
-			$this->sendPacket(new KeepAlivePacket());
+			$pk = new KeepAlivePacket();
 
-			var_dump("Sending KeepAlive");
+			$this->sendPacket($pk);
 		}), 10 * 20);
 	}
 
@@ -111,22 +93,7 @@ class NetworkSession {
 
 		$this->sendQueue[] = $packet;
 
-		$this->processPackets(false);
-	}
-
-	private function processLogin(): void{
-		if(!self::getNetworkThread()->loginSent){
-			$pk = new LoginPacket();
-			$pk->password = (string)$this->config['authentication']['password'];
-			$pk->isPublicKeyAuth = (bool)$this->config['authentication']['passwordless'];
-			$pk->publicKeyData = file_get_contents($this->plugin->getDataFolder() . $this->config['authentication']['public-key']);
-
-			$this->sendPacket($pk);
-
-			self::getNetworkThread()->loginSent = true;
-		}else{
-			$this->pollPackets();
-		}
+		$this->processPackets();
 	}
 
 	/**
@@ -143,21 +110,10 @@ class NetworkSession {
 		$this->recvQueue = [];
 	}
 
-	/**
-	 * Process sent and received packets from this client and the server, this is
-	 * considered as a duplex packet operation.
-	 *
-	 * @param bool $authenticate
-	 * @internal
-	 */
-	private function processPackets(bool $authenticate = true): void{
+	private function processPackets(): void{
 		$thread = self::getNetworkThread();
 
 		$thread->handleNetworkPacket($this->recvQueue, $this->sendQueue);
-		if(!$thread->isAuthenticated && $authenticate){
-			$this->processLogin();
-		}else{
-			$this->pollPackets();
-		}
+		$this->pollPackets();
 	}
 }

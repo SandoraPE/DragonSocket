@@ -1,6 +1,6 @@
-<?php
+<?php /** @noinspection PhpArrayUsedOnlyForWriteInspection */
 /*
- * PHP Secure Socket Transfer
+ * PHP Secure Socket Client
  *
  * Copyright (C) 2020 larryTheCoder
  *
@@ -26,6 +26,7 @@ use Closure;
 use larryTheCoder\socket\packets\protocol\DragonNetProtocol;
 use pocketmine\MemoryManager;
 use pocketmine\utils\Binary;
+use pocketmine\utils\BinaryStream;
 use pocketmine\utils\MainLogger;
 use pocketmine\utils\TextFormat;
 use React\EventLoop\StreamSelectLoop;
@@ -57,35 +58,33 @@ use const pocketmine\DATA;
  */
 class NetworkContainer {
 
-	public const MAX_FRAME_LENGTH = 0x7FFF;
-
 	/** @var StreamSelectLoop */
-	private $streamLoop;
+	private StreamSelectLoop $streamLoop;
 	/** @var NetworkThread */
-	private $thread;
-	/** @var mixed[] */
-	private $settings;
+	private NetworkThread $thread;
+	/** @var array */
+	private array $settings;
 
 	/** @var TimerInterface|null */
-	private $writeTimer = null;
+	private ?TimerInterface $writeTimer = null;
 	/** @var TimerInterface|null */
-	private $reconnectTask = null;
+	private ?TimerInterface $reconnectTask = null;
 
 	/** @var Closure|null */
-	private $socketWrite = null;
+	private ?Closure $socketWrite = null;
 	/** @var ConnectionInterface|null */
-	private $connection = null;
+	private ?ConnectionInterface $connection = null;
 
 	/** @var string[] */
-	private $recvQueue = [];
+	private array $recvQueue = [];
 	/** @var string[] */
-	private $sendQueue = [];
+	private array $sendQueue = [];
 	/** @var string[] */
-	private $waitingQueue = [];
+	private array $waitingQueue = [];
 
 	/**
 	 * @param NetworkThread $thread
-	 * @param mixed[] $settings
+	 * @param array $settings
 	 */
 	public function __construct(NetworkThread $thread, array $settings){
 		$this->streamLoop = new StreamSelectLoop();
@@ -115,7 +114,7 @@ class NetworkContainer {
 			}else{
 				// This will accumulate outboundQueue with the packets that will be required to sent.
 				// Until the socket has successfully being connected, the packets will be queued into order.
-				if($this->thread->isAuthenticated){
+				if($this->thread->isConnected()){
 					$this->sendQueue = array_merge($this->sendQueue, $this->waitingQueue);
 					$this->waitingQueue = [];
 
@@ -154,26 +153,22 @@ class NetworkContainer {
 		$this->thread->reconnecting = true;
 		$connection = new Connector($this->streamLoop, [
 			'tls' => [
-				'peer_name'         => 'server1.potatohome.xyz',
-				'cafile'            => $this->thread->getSourcePath() . '/resources/certificate.crt',
+				'cafile'            => $this->thread->getCertificatePath(),
 				'allow_self_signed' => true,
-				'crypto_method'     => STREAM_CRYPTO_METHOD_ANY_CLIENT,
+				'crypto_method'     => STREAM_CRYPTO_METHOD_TLSv1_2_CLIENT,
 			],
 		]);
 
 		// Needless to say, connection to the server always have their SSL certificates turned on.
 		$connection->connect("tls://" . $this->settings['server-socket'] . ":" . $this->settings['server-port'])->then(function(ConnectionInterface $connection): void{
-			$this->socketWrite = $this->getWriteClosure();
+			$this->socketWrite = $this->getWriteClosure($connection);
 
 			$connection->on('data', $this->getReadClosure());
 			$connection->on('close', $this->getCloseClosure());
-			$connection->on('end', $this->getSocketDrained());
 
 			$this->writeTimer = $this->streamLoop->addPeriodicTimer(0.01, function() use ($connection): void{
 				foreach(array_merge($this->sendQueue, $this->waitingQueue) as $packet){
 					if(Binary::readInt($packet) === DragonNetProtocol::KEEP_ALIVE_PACKET && !$this->thread->connected){
-						continue;
-					}elseif(Binary::readInt($packet) !== DragonNetProtocol::LOGIN_PROTOCOL && !$this->thread->isAuthenticated){
 						continue;
 					}
 
@@ -185,16 +180,6 @@ class NetworkContainer {
 
 				$this->thread->connected = true;
 				$this->thread->reconnecting = false;
-
-				if(!empty($this->frames)){
-					var_dump("Socket is ready " . count($this->frames));
-
-					foreach($this->frames as $id => $frame){
-						$connection->write($frame);
-
-						unset($this->frames[$id]);
-					}
-				}
 			});
 
 			$this->connection = $connection;
@@ -207,11 +192,9 @@ class NetworkContainer {
 
 			if(strpos($err->getMessage(), 'Connection refused') !== false){
 				$this->startReconnectTimer();
-
-				return;
+			} else {
+				MainLogger::getLogger()->logException($err);
 			}
-
-			MainLogger::getLogger()->logException($err);
 		});
 	}
 
@@ -252,6 +235,8 @@ class NetworkContainer {
 		if($this->connection !== null){
 			$this->connection->end();
 			$this->connection->close();
+
+			$this->connection = null;
 		}
 	}
 
@@ -263,87 +248,87 @@ class NetworkContainer {
 			$this->startReconnectTimer();
 
 			$this->thread->connected = false;
-			$this->thread->isAuthenticated = false;
-			$this->thread->loginSent = false;
 		};
 	}
 
 	//////////////////////////////////////// MEMORY-SAFE TASKS AND CLOSURES ////////////////////////////////////////
 
 	private function getReadClosure(): Closure{
-		/** @var string|null $packetBuilder */
+		/** @var BinaryStream|null $packetBuilder */
 		$packetBuilder = null;
-		$packetLength = 0;
+		$bytesToRead = 0;
 		$queue = &$this->recvQueue;
 
-		return static function($data) use (&$queue, &$packetLength, &$packetBuilder): void{
+		return static function($data) use (&$queue, &$bytesToRead, &$packetBuilder): void{
 			// Discard any empty data, the documentation said that this data can return empty
 			// data so we do not want to process that thing here.
 			if(empty($data)) return;
 
+			// FRAGMENTATION SCENARIOS:
+			// "Payload" . "Payload"
+			// "Payload" . "Fragmented Payload"
+			// "Fragmented Payload"
+			// "Fragmented Payload" . "Payload"
+			// "Fragmented Payload" . "Fragmented Payload" . "..."
 			if($packetBuilder === null){
-				packetBuilder:
+				$packetBuilder = new BinaryStream($data);
 
-				$packetLength = Binary::readInt($data);
+				decodeFragments:
+				$packetLength = $packetBuilder->getInt();
 
-				$data = substr($data, 4, strlen($data));
-
-				if(($length = strlen($data)) < $packetLength){
-					$packetBuilder = $data;
-				}elseif($length > $packetLength){
-					$queue[] = substr($data, 0, $packetLength);
-
-					$data = substr($data, $packetLength, $length);
-
-					goto packetBuilder;
+				$bytesRecv = strlen(substr($packetBuilder->getBuffer(), $packetBuilder->getOffset()));
+				$bytesToRead = $packetLength - $bytesRecv;
+				if($bytesToRead === 0){
+					// The length is exactly the same as the received bytes
+					$payload = $packetBuilder->get($packetLength);
+				}elseif($bytesToRead > 0){
+					// There is some payload left that we need to receive.
+					$payload = $packetBuilder->get(true);
 				}else{
-					$queue[] = $data;
+					// Rewind received payload to match packet length.
+					$payload = $packetBuilder->get($bytesRecv + $bytesToRead);
+				}
+
+				if($bytesToRead <= 0){
+					$queue[] = $payload;
+
+					// The bytes that was suppose to be read was too much, it means that
+					// the packet fragmented into the same payload
+					if($bytesToRead < 0){
+						$packetBuilder = new BinaryStream($packetBuilder->getRemaining());
+
+						goto decodeFragments;
+					}else{
+						$packetBuilder = null;
+					}
+				}else{
+					$packetBuilder->rewind();
 				}
 			}else{
-				$packetBuilder .= $data;
-				if(($length = strlen($packetBuilder)) >= $packetLength){
+				$packetLength = $packetBuilder->getInt();
+				$bytesToRead = $bytesToRead - strlen($data);
 
-					$queue[] = substr($packetBuilder, 0, $packetLength);
+				$packetBuilder->put($data);
+				if($bytesToRead <= 0){
+					$queue[] = $packetBuilder->get($packetLength);
 
-					$packetBuilder = null;
-					if($length > $packetLength){
-						$data = substr($data, $packetLength, $length);
+					if(!$packetBuilder->feof()){
+						$packetBuilder = new BinaryStream($packetBuilder->getRemaining());
 
-						goto packetBuilder;
+						goto decodeFragments;
 					}
+				}else{
+					$packetBuilder->rewind();
 				}
 			}
 		};
 	}
 
-	/** @var bool */
-	private $isReady = true;
-	/** @var string[] */
-	private $frames = [];
-
-	private function getSocketDrained(): Closure{
-		$isReady = &$this->isReady;
-
-		return static function() use (&$isReady): void{
-			var_dump("Socket is drained");
-
-			$isReady = true;
-		};
-	}
-
-	private function getWriteClosure(): Closure{
-		$frames = &$this->frames;
-
-		return static function(string $data) use (&$frames): void{
+	private function getWriteClosure(ConnectionInterface $connection): Closure{
+		return static function(string $data) use ($connection): void{
 			$data = Binary::writeInt(strlen($data)) . $data;
 
-			while(strlen($data) > self::MAX_FRAME_LENGTH){
-				$frames[] = substr($data, 0, self::MAX_FRAME_LENGTH);
-
-				$data = substr($data, self::MAX_FRAME_LENGTH, strlen($data));
-			}
-
-			$frames[] = $data;
+			$connection->write($data);
 		};
 	}
 	//////////////////////////////////////// MEMORY-SAFE TASKS AND CLOSURES ////////////////////////////////////////

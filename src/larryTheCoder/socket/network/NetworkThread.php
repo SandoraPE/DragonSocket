@@ -20,6 +20,7 @@
 
 namespace larryTheCoder\socket\network;
 
+use larryTheCoder\SecureSocket;
 use larryTheCoder\socket\packets\Packet;
 use larryTheCoder\socket\packets\PacketManager;
 use Phar;
@@ -34,47 +35,47 @@ use Throwable;
 
 class NetworkThread extends Thread {
 
-	/** @var Threaded[]|string[] */
-	private $recvQueue;
-	/** @var Threaded[]|string[] */
-	private $sendQueue;
+	/** @var Threaded|string[] */
+	private Threaded $recvQueue;
+	/** @var Threaded|string[] */
+	private Threaded $sendQueue;
 
 	/** @var string */
-	private $settings;
+	private string $settings;
 	/** @var ThreadedLogger */
-	private $logger;
+	private ThreadedLogger $logger;
 
 	/** @var bool */
-	public $isRunning = true;
+	public bool $isRunning = true;
 	/** @var bool */
-	public $connected = false;
+	public bool $connected = false;
 	/** @var bool */
-	public $reconnecting = false;
+	public bool $reconnecting = false;
 	/** @var bool */
-	public $dumpMemory = false;
-	/** @var bool */
-	public $isAuthenticated = false;
-	/** @var bool */
-	public $loginSent = false;
+	public bool $dumpMemory = false;
 
 	/** @var SleeperNotifier */
-	private $notifier;
+	private SleeperNotifier $notifier;
+	/** @var string */
+	private string $certificatePath;
 
 	/**
 	 * The networking thread that is responsible in handling server's client connection.
 	 * This network uses React\Socket as an example for PocketMine-MP socket
 	 *
+	 * @param SecureSocket $socket
 	 * @param ThreadedLogger $logger
 	 * @param SleeperNotifier $notifier
-	 * @param mixed[] $settings
+	 * @param array $settings
 	 */
-	public function __construct(ThreadedLogger $logger, SleeperNotifier $notifier, array $settings){
+	public function __construct(SecureSocket $socket, ThreadedLogger $logger, SleeperNotifier $notifier, array $settings){
 		$this->recvQueue = new Threaded();
 		$this->sendQueue = new Threaded();
 
 		$this->logger = $logger;
 		$this->notifier = $notifier;
 		$this->settings = serialize($settings);
+		$this->certificatePath = $socket->getDataFolder() . "certificate.crt";
 
 		$this->start(PTHREADS_INHERIT_INI | PTHREADS_INHERIT_CONSTANTS);
 	}
@@ -114,7 +115,6 @@ class NetworkThread extends Thread {
 		$this->connected = false;
 		$this->reconnecting = false;
 		$this->isRunning = false;
-		$this->loginSent = false;
 	}
 
 	/**
@@ -152,11 +152,8 @@ class NetworkThread extends Thread {
 
 		while(($packet = $this->sendQueue->shift()) !== null){
 			$sendQueue[] = $packet;
-		}
-	}
 
-	public function setAuthenticated(bool $isAuthenticated): void{
-		$this->isAuthenticated = $isAuthenticated;
+		}
 	}
 
 	public function sync(): void{
@@ -166,11 +163,10 @@ class NetworkThread extends Thread {
 
 			if($maxTries >= 2000){
 				MainLogger::getLogger()->info("[DragonNet] " . TextFormat::RED . "Timed out while waiting for socket to connect to the server");
-
-				return;
+				break;
+			}else{
+				usleep(1000);
 			}
-
-			usleep(1000);
 		}
 	}
 
@@ -196,5 +192,13 @@ class NetworkThread extends Thread {
 		$phar = Phar::running(true);
 
 		return empty($phar) ? dirname(__DIR__, 4) : $phar;
+	}
+
+	public function getCertificatePath(): string{
+		return $this->certificatePath;
+	}
+
+	public function isConnected(): bool{
+		return $this->connected;
 	}
 }

@@ -1,6 +1,6 @@
 <?php
 /*
- * PHP Secure Socket Transfer
+ * PHP Secure Socket Client
  *
  * Copyright (C) 2020 larryTheCoder
  *
@@ -35,9 +35,9 @@ class DisconnectPacket extends Packet {
 	public const RATE_LIMITED = 4;
 
 	/** @var int */
-	public $errorCode = self::CLIENT_SERVER_CLOSED;
+	public int $errorCode = self::CLIENT_SERVER_CLOSED;
 	/** @var int */
-	public $rateLimit = 0;
+	public int $rateLimit = 0;
 
 	public function decodePayload(): void{
 		$this->errorCode = $this->getInt();

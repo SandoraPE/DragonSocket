@@ -1,6 +1,6 @@
 <?php
 /*
- * PHP Secure Socket Transfer
+ * PHP Secure Socket Client
  *
  * Copyright (C) 2020 larryTheCoder
  *
@@ -25,7 +25,6 @@ namespace larryTheCoder\socket\packets;
 use larryTheCoder\socket\packets\impl\DisconnectPacket;
 use larryTheCoder\socket\packets\impl\GenericPacket;
 use larryTheCoder\socket\packets\impl\KeepAlivePacket;
-use larryTheCoder\socket\packets\impl\LoginPacket;
 use larryTheCoder\socket\packets\protocol\DragonNetProtocol;
 use pocketmine\utils\Binary;
 use pocketmine\utils\SingletonTrait;
@@ -34,10 +33,9 @@ class PacketManager {
 	use SingletonTrait;
 
 	/** @var string[] */
-	private $packets = [];
+	private array $packets = [];
 
 	public function __construct(){
-		$this->registerPacket(DragonNetProtocol::LOGIN_PROTOCOL, LoginPacket::class);
 		$this->registerPacket(DragonNetProtocol::DISCONNECT_PACKET, DisconnectPacket::class);
 		$this->registerPacket(DragonNetProtocol::KEEP_ALIVE_PACKET, KeepAlivePacket::class);
 	}

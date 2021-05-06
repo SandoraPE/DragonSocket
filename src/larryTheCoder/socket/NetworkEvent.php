@@ -1,6 +1,6 @@
 <?php
 /*
- * PHP Secure Socket Transfer
+ * PHP Secure Socket Client
  *
  * Copyright (C) 2020 larryTheCoder
  *
@@ -26,6 +26,7 @@ use InvalidArgumentException;
 use larryTheCoder\socket\packets\Packet;
 use pocketmine\utils\MainLogger;
 use pocketmine\utils\Utils;
+use ReflectionException;
 use Throwable;
 
 /**
@@ -45,7 +46,7 @@ class NetworkEvent {
 	private const SCOPE_WHITELIST = 1;
 
 	/** @var int */
-	private $callableId = 0;
+	private int $callableId = 0;
 	/** @var mixed */
 	private $events = [];
 
@@ -57,17 +58,20 @@ class NetworkEvent {
 			MainLogger::getLogger()->debug("Still " . strlen($remains) . " bytes unread in " . $packet->getName() . ": 0x" . bin2hex($remains));
 		}
 
-		foreach($this->events as [$callable, $eventType, $packets]){
-			try{
-				if($eventType === self::SCOPE_BLACKLIST && !in_array($packet->pid(), $packets, true)){
-					$callable($packet);
-				}elseif($eventType === self::SCOPE_WHITELIST && in_array($packet->pid(), $packets, true)){
-					$callable($packet);
+		try{
+			foreach($this->events as [$callable, $eventType, $packets]){
+				try{
+					if($eventType === self::SCOPE_BLACKLIST && !in_array($packet->pid(), $packets, true)){
+						$callable($packet);
+					}elseif($eventType === self::SCOPE_WHITELIST && in_array($packet->pid(), $packets, true)){
+						$callable($packet);
+					}
+				}catch(Throwable $error){
+					MainLogger::getLogger()->critical('Unhandled callable function of ' . Utils::getNiceClosureName($callable) . '.');
+					MainLogger::getLogger()->logException($error);
 				}
-			}catch(Throwable $error){
-				MainLogger::getLogger()->critical('Unhandled callable function of ' . Utils::getNiceClosureName($callable) . '.');
-				MainLogger::getLogger()->logException($error);
 			}
+		}catch(ReflectionException $exception){
 		}
 	}
 

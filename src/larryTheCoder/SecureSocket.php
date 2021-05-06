@@ -1,6 +1,6 @@
 <?php
 /**
- * PHP Secure Socket Transfer
+ * PHP Secure Socket Client
  *
  * Copyright (C) 2020 larryTheCoder
  *
@@ -28,7 +28,7 @@ use pocketmine\plugin\PluginBase;
 class SecureSocket extends PluginBase {
 
 	/** @var NetworkSession */
-	private $session;
+	private NetworkSession $session;
 
 	public function onLoad(){
 		$this->saveResource("config.yml", false);
